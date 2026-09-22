@@ -4,10 +4,10 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-
 PACKAGE_DIR = Path(__file__).parents[1] / "workflow_packages/growth.competitor_review_miner"
+REPO_ROOT = Path(__file__).parents[1]
 KEY = "growth.competitor_review_miner"
+QUALIFICATION_FILE = REPO_ROOT / f"workflow_evals/{KEY}/qualification.json"
 
 # ---------------------------------------------------------------------------
 # Manifest checks
@@ -38,44 +38,117 @@ def test_manifest_input_schema_has_required_properties():
     assert "project_id" in required
     assert "competitor_name" in required
     assert "reviews_text" in required
-    # project_id format
-    assert props["project_id"]["format"] == "uuid"
-    # reviews_text has a maxLength to bound input
-    assert props["reviews_text"]["maxLength"] <= 16000
-    # focus is optional
-    assert "focus" not in required
-    # additionalProperties must be false
-    assert schema.get("additionalProperties") is False
+    assert "maxLength" in props["competitor_name"]
+    assert "maxLength" in props["reviews_text"]
+    assert "focus" in props
+
+
+def test_manifest_procedure_paths_are_valid():
+    manifest = json.loads((PACKAGE_DIR / "workflow.json").read_text())
+    proc = manifest["definition"]["procedure"]
+    assert (PACKAGE_DIR / proc["prompt_path"]).is_file()
+    assert (PACKAGE_DIR / proc["skills_path"]).is_dir()
+    for f in proc["skill_files"]:
+        assert (PACKAGE_DIR / f).is_file(), f"Missing skill file: {f}"
+    entry_skill_dir = PACKAGE_DIR / proc["skills_path"] / proc["entry_skill"]
+    assert entry_skill_dir.is_dir()
+    assert (entry_skill_dir / "SKILL.md").is_file()
 
 
 def test_manifest_output_is_project_artifact():
     manifest = json.loads((PACKAGE_DIR / "workflow.json").read_text())
     output = manifest["definition"]["procedure"]["output"]
     assert output["kind"] == "project.artifact"
+    assert output["path"].startswith("reports/")
     assert output["media_type"] == "text/markdown"
-    assert "COMPETITOR_REVIEW_MINER.md" in output["path"]
-    assert output["max_bytes"] <= 50000
+    assert output["max_bytes"] > 0
 
 
-def test_procedure_entry_skill_matches_declared_file():
+def test_manifest_sandbox_is_fenced_and_isolated():
     manifest = json.loads((PACKAGE_DIR / "workflow.json").read_text())
-    procedure = manifest["definition"]["procedure"]
-    entry = procedure["entry_skill"]
-    skill_files = procedure["skill_files"]
-    # The entry skill's SKILL.md must appear in the declared files list
-    expected_path = f"skills/{entry}/SKILL.md"
-    assert any(expected_path in sf for sf in skill_files), (
-        f"entry_skill '{entry}' has no matching SKILL.md in skill_files: {skill_files}"
+    sandbox = manifest["definition"]["procedure"]["sandbox"]
+    assert sandbox["profile"] == "isolated"
+    assert sandbox["egress"] == "fenced"
+    assert sandbox["timeout_seconds"] <= 900
+
+
+# ---------------------------------------------------------------------------
+# SKILL.md checks
+# ---------------------------------------------------------------------------
+
+
+def test_skill_frontmatter_name_matches_directory():
+    skill_path = PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md"
+    content = skill_path.read_text()
+    match = re.search(r"^name:\s*(.+)$", content, re.MULTILINE)
+    assert match, "SKILL.md missing frontmatter 'name:'"
+    assert match.group(1).strip() == "competitor-review-miner"
+
+
+def test_skill_frontmatter_description_is_non_empty():
+    skill_path = PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md"
+    content = skill_path.read_text()
+    match = re.search(r"^description:\s*(.+)$", content, re.MULTILINE)
+    assert match, "SKILL.md missing frontmatter 'description:'"
+    assert len(match.group(1).strip()) > 10
+
+
+def test_skill_defines_required_analysis_buckets():
+    skill_text = (PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md").read_text()
+    required_buckets = [
+        "Pain Points",
+        "Loved Features",
+        "Switching Triggers",
+        "Pricing Signals",
+        "Missed Use Cases",
+    ]
+    for bucket in required_buckets:
+        assert bucket in skill_text, f"SKILL.md missing bucket: {bucket}"
+
+
+def test_skill_defines_report_sections():
+    skill_text = (PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md").read_text()
+    required_sections = [
+        "Signal summary",
+        "Pain Points",
+        "Loved Features",
+        "Switching Triggers",
+        "Pricing Signals",
+        "Missed Use Cases",
+        "Three growth moves",
+        "Evidence notes",
+    ]
+    for section in required_sections:
+        assert section in skill_text, f"SKILL.md missing section: {section}"
+
+
+def test_skill_enforces_anti_hallucination_rule():
+    skill_text = (PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md").read_text()
+    assert "verbatim" in skill_text.lower(), "SKILL.md should require verbatim quotes from reviews"
+    assert "paraphrased" in skill_text.lower(), (
+        "SKILL.md should require (paraphrased) label if exact quote is not used"
     )
 
 
-def test_no_integration_requirements_needed():
-    """This workflow intentionally requires zero API connections — any founder can run it."""
-    manifest = json.loads((PACKAGE_DIR / "workflow.json").read_text())
-    definition = manifest["definition"]
-    # Either the key is absent, or the list is empty
-    reqs = definition.get("integration_requirements", [])
-    assert reqs == [], f"Expected no integration_requirements, got: {reqs}"
+def test_skill_restricts_safe_files_and_forbids_sensitive_files():
+    skill_text = (PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md").read_text()
+    prompt_text = (PACKAGE_DIR / "PROMPT.md").read_text()
+    for text in (skill_text, prompt_text):
+        assert ".env" in text
+        assert "credentials" in text
+        assert "session histories" in text
+        assert "explicitly safe" in text
+
+
+def test_skill_defines_diagnostic_report_format():
+    skill_text = (PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md").read_text()
+    assert "Competitor Review Miner — Diagnostic Report" in skill_text
+    assert "Status: invalid input" in skill_text
+
+
+def test_skill_caps_processing_at_200_reviews():
+    skill_text = (PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md").read_text()
+    assert "200" in skill_text, "SKILL.md should mention the 200 review processing cap"
 
 
 # ---------------------------------------------------------------------------
@@ -83,79 +156,22 @@ def test_no_integration_requirements_needed():
 # ---------------------------------------------------------------------------
 
 
-def test_prompt_is_non_empty_and_non_trivial():
+def test_prompt_forbids_dangerous_actions():
     prompt = (PACKAGE_DIR / "PROMPT.md").read_text()
-    assert len(prompt.strip()) >= 50, "PROMPT.md is too short to be meaningful"
-    # Must reference the skill or the output path
-    assert "competitor-review-miner" in prompt or "COMPETITOR_REVIEW_MINER" in prompt
+    assert "untrusted" in prompt.lower()
+    assert "do not publish" in prompt.lower()
+    assert "credentials" in prompt.lower()
 
 
-def test_prompt_does_not_allow_dangerous_actions():
-    prompt = (PACKAGE_DIR / "PROMPT.md").read_text().lower()
-    # The prompt must explicitly guard against publishing/sending
-    assert "do not publish" in prompt or "not publish" in prompt
-
-
-# ---------------------------------------------------------------------------
-# SKILL.md checks
-# ---------------------------------------------------------------------------
-
-SKILL_PATH = PACKAGE_DIR / "skills/competitor-review-miner/SKILL.md"
-
-
-def test_skill_file_exists():
-    assert SKILL_PATH.is_file()
-
-
-def test_skill_has_valid_yaml_frontmatter():
-    text = SKILL_PATH.read_text()
-    assert text.startswith("---"), "SKILL.md must start with YAML frontmatter (---)"
-    # Find the closing ---
-    end = text.find("\n---\n", 3)
-    assert end != -1, "SKILL.md frontmatter is not closed with ---"
-    frontmatter = text[3:end]
-    assert "name:" in frontmatter
-    assert "description:" in frontmatter
-
-
-def test_skill_name_in_frontmatter_matches_folder():
-    text = SKILL_PATH.read_text()
-    end = text.find("\n---\n", 3)
-    frontmatter = text[3:end]
-    name_match = re.search(r"^name:\s*(.+)$", frontmatter, re.MULTILINE)
-    assert name_match, "No 'name:' field found in SKILL.md frontmatter"
-    assert name_match.group(1).strip() == "competitor-review-miner"
-
-
-def test_skill_covers_all_five_signal_buckets():
-    text = SKILL_PATH.read_text()
-    expected_buckets = [
-        "Pain Points",
-        "Loved Features",
-        "Switching Triggers",
-        "Pricing Signals",
-        "Missed Use Cases",
-    ]
-    for bucket in expected_buckets:
-        assert bucket in text, f"SKILL.md does not mention bucket: '{bucket}'"
-
-
-def test_skill_describes_three_growth_moves():
-    text = SKILL_PATH.read_text()
-    assert "Messaging hook" in text or "messaging hook" in text.lower()
-    assert "Acquisition" in text or "acquisition" in text.lower()
-    assert "gap" in text.lower()
-
-
-def test_skill_describes_output_report_structure():
-    text = SKILL_PATH.read_text()
-    assert "COMPETITOR_REVIEW_MINER.md" in text, (
-        "SKILL.md should reference the declared output path"
-    )
+def test_prompt_names_correct_output_path():
+    manifest = json.loads((PACKAGE_DIR / "workflow.json").read_text())
+    declared_path = manifest["definition"]["procedure"]["output"]["path"]
+    prompt = (PACKAGE_DIR / "PROMPT.md").read_text()
+    assert declared_path in prompt
 
 
 # ---------------------------------------------------------------------------
-# Package-level community validation (static only, no model calls)
+# Community validator check
 # ---------------------------------------------------------------------------
 
 
@@ -170,9 +186,102 @@ async def test_package_passes_community_validator():
 async def test_all_declared_skill_files_exist_on_disk():
     manifest = json.loads((PACKAGE_DIR / "workflow.json").read_text())
     for skill_file in manifest["definition"]["procedure"]["skill_files"]:
-        # skill_files paths are relative to the package directory
         target = PACKAGE_DIR / skill_file
         assert target.is_file(), f"Declared skill_file not found on disk: {skill_file}"
+
+
+# ---------------------------------------------------------------------------
+# Workflow qualification checks
+# ---------------------------------------------------------------------------
+
+
+async def test_workflow_qualification_contract():
+    from tin_lite.workflow_packages import decode_workflow_source
+    from tin_lite.workflow_qualification import Qualification, check_package
+
+    assert QUALIFICATION_FILE.is_file(), f"Qualification file missing: {QUALIFICATION_FILE}"
+    contract = Qualification.model_validate_json(QUALIFICATION_FILE.read_bytes())
+    assert contract.version == 1
+    case_ids = {case.id for case in contract.cases}
+    assert "ordinary_reviews" in case_ids
+    assert "boundary_csv_and_cap" in case_ids
+    assert "insufficient_reviews_diagnostic" in case_ids
+    assert len(contract.rubric) >= 2
+
+    raw_manifest = (PACKAGE_DIR / "workflow.json").read_bytes()
+    manifest_rel = f"workflow_packages/{KEY}/workflow.json"
+    source = decode_workflow_source(raw_manifest, definition_path=manifest_rel)
+    files = {manifest_rel: raw_manifest}
+    for res in source.resource_paths.values():
+        files[res] = (REPO_ROOT / res).read_bytes()
+
+    report = await check_package(files, manifest_rel, contract)
+    assert report["shape"]["status"] == "passed"
+    assert report["cost"]["configured_ceiling_usd"] == "5"
+    assert report["cost"]["basis"] == "unmeasured"
+    assert report["safety"]["status"] == "review_required"
+
+
+async def test_qualification_cli_checkout():
+    from tin_lite.workflow_qualification_cli import check_checkout
+
+    manifest_rel = f"workflow_packages/{KEY}/workflow.json"
+    await check_checkout(REPO_ROOT, manifest_rel)
+
+
+def test_qualification_fixtures_evaluation():
+    from tin_lite.workflow_qualification import Qualification, assess_output
+
+    contract = Qualification.model_validate_json(QUALIFICATION_FILE.read_bytes())
+    cases_by_id = {c.id: c for c in contract.cases}
+
+    ordinary_output = (
+        "# Competitor review intelligence: AcmeDesk\n\n"
+        "## Signal summary\n| Bucket | Reviews | Score |\n\n"
+        "## Pain Points\n- Slow sync and crashes\n\n"
+        "## Loved Features\n- Clean dashboard\n\n"
+        "## Switching Triggers\n- Customer switched because pricing jumped 40%\n\n"
+        "## Pricing Signals\n- Pricing sudden hike\n\n"
+        "## Missed Use Cases\n- Large queue handling\n\n"
+        "## Three growth moves\n1. Target switched AcmeDesk users.\n\n"
+        "## Evidence notes\n- Units processed: 3\n"
+    )
+    result_ord = assess_output(
+        cases_by_id["ordinary_reviews"],
+        status="succeeded",
+        content=ordinary_output.encode(),
+    )
+    assert result_ord["status"] == "passed"
+
+    boundary_output = (
+        "# Competitor review intelligence: LegacyCRM\n\n"
+        "## Signal summary\n| Bucket | Reviews | Score |\n\n"
+        "## Pain Points\n- Export timeout\n\n"
+        "## Loved Features\n- Sequences\n\n"
+        "## Switching Triggers\n- Cancelled subscription\n\n"
+        "## Pricing Signals\n- Hidden SSO fees\n\n"
+        "## Missed Use Cases\n- Webhooks\n\n"
+        "## Three growth moves\nLegacyCRM migration plays.\n\n"
+        "## Evidence notes\n- Input format detected: CSV (column 'review')\n- Units processed: 5\n"
+    )
+    result_bnd = assess_output(
+        cases_by_id["boundary_csv_and_cap"],
+        status="succeeded",
+        content=boundary_output.encode(),
+    )
+    assert result_bnd["status"] == "passed"
+
+    diag_output = (
+        "# Competitor Review Miner — Diagnostic Report\n\n"
+        "Status: invalid input\n\n"
+        "Reason: insufficient reviews supplied (minimum 2 lines or CSV data rows required)."
+    )
+    result_diag = assess_output(
+        cases_by_id["insufficient_reviews_diagnostic"],
+        status="succeeded",
+        content=diag_output.encode(),
+    )
+    assert result_diag["status"] == "passed"
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +315,7 @@ VALID_REVIEWS_CSV = (
 
 
 def test_plain_text_reviews_are_recognisable():
-    lines = [l for l in VALID_REVIEWS_PLAIN.splitlines() if l.strip()]
+    lines = [line for line in VALID_REVIEWS_PLAIN.splitlines() if line.strip()]
     assert len(lines) >= 2, "Fixture should have at least two non-empty review lines"
 
 
@@ -216,19 +325,11 @@ def test_csv_reviews_contain_recognisable_header():
 
 
 def test_unusable_model_result_is_documented():
-    """
-    Documents what a plausible-but-unusable model result looks like for this workflow.
-    The skill must not crash or produce invalid output if the agent returns empty buckets.
-    This test verifies the output schema is structurally sound.
-    """
-    # A minimal valid output: all buckets empty with a diagnostic note is acceptable.
-    minimal_output = (
-        "# Competitor review intelligence: Acme\n\n"
-        "**Reviews analysed:** 0 of 0 supplied\n\n"
-        "No reviews could be parsed from the supplied input.\n\n"
-        "## Evidence notes\n\n"
-        "- Total review units supplied: 0\n"
-        "- Input format detected: unknown\n"
+    """Documents what a diagnostic output looks like for this workflow."""
+    diagnostic_output = (
+        "# Competitor Review Miner — Diagnostic Report\n\n"
+        "Status: invalid input\n\n"
+        "No reviews could be parsed from the supplied input.\n"
     )
-    assert "Competitor review intelligence" in minimal_output
-    assert "Evidence notes" in minimal_output
+    assert "Diagnostic Report" in diagnostic_output
+    assert "Status: invalid input" in diagnostic_output

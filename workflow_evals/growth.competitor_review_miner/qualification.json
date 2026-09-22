@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "assumptions": [
+    "Public competitor review text or CSV export with at least two reviews and at most 200,000 characters.",
+    "At most 200 reviews parsed and analyzed per execution.",
+    "Safe project context bounded to at most 8000 bytes from non-sensitive documentation (e.g. README, public docs)."
+  ],
+  "cost_drivers": [
+    "Bounded Codex procedure session using standard rate card; spending capped at configured sandbox ceiling.",
+    "Execution work scales with review corpus token count (up to 200 reviews) and output narrative size.",
+    "Zero paid external integrations or live provider API requests."
+  ],
+  "effects": [
+    "Writes reports/COMPETITOR_REVIEW_MINER.md in the bound project workspace.",
+    "No external network egress, file mutations outside reports/COMPETITOR_REVIEW_MINER.md, secret access, or publication."
+  ],
+  "cases": [
+    {
+      "id": "ordinary_reviews",
+      "description": "Normal case: Three realistic competitor reviews with pain points, loved features, and a switching trigger.",
+      "inputs": {
+        "competitor_name": "AcmeDesk",
+        "reviews_text": "I switched away from AcmeDesk because pricing jumped 40% overnight for small teams.\nAcmeDesk has a clean dashboard and great ticket triage, which our agents loved.\nSync is terribly slow and the mobile app crashes whenever resolving large queues.",
+        "focus": "pricing and reliability"
+      },
+      "expected_status": "succeeded",
+      "expect": {
+        "contains": [
+          "Competitor review intelligence: AcmeDesk",
+          "## Signal summary",
+          "## Pain Points",
+          "## Loved Features",
+          "## Switching Triggers",
+          "## Pricing Signals",
+          "## Missed Use Cases",
+          "## Three growth moves",
+          "## Evidence notes",
+          "switched"
+        ],
+        "excludes": [
+          "Status: invalid input",
+          "Status: insufficient data"
+        ]
+      }
+    },
+    {
+      "id": "boundary_csv_and_cap",
+      "description": "Boundary case: CSV with standard header column and reviews reaching processing bounds.",
+      "inputs": {
+        "competitor_name": "LegacyCRM",
+        "reviews_text": "review,rating\n\"Exporting contact lists takes 20 minutes and frequently timeouts.\",2\n\"Love the automated email sequences, but reporting is completely opaque.\",3\n\"Canceled our subscription after hidden add-on fees for SSO.\",1\n\"Customer support took 4 days to respond to an outage.\",1\n\"Good basic contact storage but lacks modern webhook integrations.\",2\n",
+        "focus": ""
+      },
+      "expected_status": "succeeded",
+      "expect": {
+        "contains": [
+          "Competitor review intelligence: LegacyCRM",
+          "## Signal summary",
+          "## Pain Points",
+          "## Switching Triggers",
+          "## Pricing Signals",
+          "## Three growth moves",
+          "## Evidence notes",
+          "CSV"
+        ],
+        "excludes": [
+          "Status: invalid input"
+        ]
+      }
+    },
+    {
+      "id": "insufficient_reviews_diagnostic",
+      "description": "Unusable result case: Single review line fails the two-review minimum, producing a diagnostic report.",
+      "inputs": {
+        "competitor_name": "SoloTool",
+        "reviews_text": "Just one short review line.",
+        "focus": ""
+      },
+      "expected_status": "succeeded",
+      "expect": {
+        "contains": [
+          "# Competitor Review Miner — Diagnostic Report",
+          "Status: invalid input",
+          "insufficient"
+        ],
+        "excludes": [
+          "## Three growth moves"
+        ]
+      }
+    }
+  ],
+  "rubric": [
+    {
+      "id": "grounding",
+      "question": "Is every pain point, loved feature, and switching trigger backed by verbatim quotes from the supplied reviews?"
+    },
+    {
+      "id": "actionability",
+      "question": "Do the three growth opportunities offer concrete, testable positioning, copy, or roadmap actions rather than generic advice?"
+    },
+    {
+      "id": "boundaries",
+      "question": "Does the workflow respect data bounds (cap at 200 reviews, safe file reads only, diagnostic output on invalid input) without hallucinations?"
+    }
+  ]
+}
