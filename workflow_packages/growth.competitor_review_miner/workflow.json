@@ -1,0 +1,59 @@
+{
+  "package_format": "tin-workflow-package-v1",
+  "definition": {
+    "key": "growth.competitor_review_miner",
+    "title": "Mine competitor reviews for growth signals",
+    "description": "A founder pastes raw competitor app reviews and gets back ranked pain points, switching triggers, and three concrete moves to acquire their unhappy users.",
+    "version": "1.0.0",
+    "executor": "codex.procedure",
+    "schedule_modes": ["on_demand"],
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id", "competitor_name", "reviews_text"],
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "competitor_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "title": "Competitor name",
+          "x-tin-ui": { "control": "text", "order": 10 }
+        },
+        "reviews_text": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 16000,
+          "title": "Competitor reviews (paste one review per line, or CSV with a 'review' column)",
+          "x-tin-ui": { "control": "textarea", "order": 20 }
+        },
+        "focus": {
+          "type": "string",
+          "maxLength": 500,
+          "default": "",
+          "title": "Optional focus area (e.g. 'onboarding', 'pricing', 'integrations')",
+          "x-tin-ui": { "control": "text", "order": 30 }
+        }
+      }
+    },
+    "procedure": {
+      "prompt_path": "PROMPT.md",
+      "skills_path": "skills",
+      "skill_files": [
+        "skills/competitor-review-miner/SKILL.md"
+      ],
+      "entry_skill": "competitor-review-miner",
+      "workspace": { "kind": "project.state" },
+      "sandbox": { "profile": "isolated", "egress": "fenced", "timeout_seconds": 900 },
+      "output": {
+        "kind": "project.artifact",
+        "path": "reports/COMPETITOR_REVIEW_MINER.md",
+        "media_type": "text/markdown",
+        "max_bytes": 50000
+      }
+    }
+  }
+}
