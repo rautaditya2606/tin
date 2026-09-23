@@ -228,6 +228,9 @@ async def test_workflow_qualification_contract():
     assert "ordinary_reviews" in case_ids
     assert "alternate_platform" in case_ids
     assert "not_found_diagnostic" in case_ids
+    assert "insufficient_data_diagnostic" in case_ids
+    assert "invalid_input_diagnostic" in case_ids
+    assert len(contract.cases) == 5
     assert len(contract.rubric) >= 2
 
     raw_manifest = (PACKAGE_DIR / "workflow.json").read_bytes()
@@ -295,36 +298,139 @@ def test_qualification_fixtures_evaluation():
     )
     assert result_alt["status"] == "passed"
 
-    diag_output = (
+    diag_not_found = (
         "# Competitor Review Miner — Diagnostic Report\n\n"
         "Status: not found\n\n"
-        "Reason: No listing found for \"xXxNoSuchProduct999xXx\" on trustpilot."
+        'Reason: No listing found for "xXxNoSuchProduct999xXx" on trustpilot.'
     )
-    result_diag = assess_output(
+    result_not_found = assess_output(
         cases_by_id["not_found_diagnostic"],
         status="succeeded",
-        content=diag_output.encode(),
+        content=diag_not_found.encode(),
     )
-    assert result_diag["status"] == "passed"
+    assert result_not_found["status"] == "passed"
+
+    diag_insufficient = (
+        "# Competitor Review Miner — Diagnostic Report\n\n"
+        "Status: insufficient data\n\n"
+        'Reason: Fewer than 2 reviews found for "BrandNewStealthApp" on producthunt.'
+    )
+    result_insufficient = assess_output(
+        cases_by_id["insufficient_data_diagnostic"],
+        status="succeeded",
+        content=diag_insufficient.encode(),
+    )
+    assert result_insufficient["status"] == "passed"
+
+    diag_invalid_input = (
+        "# Competitor Review Miner — Diagnostic Report\n\n"
+        "Status: invalid input\n\n"
+        "Reason: competitor_name must be a company or product name, not a URL."
+    )
+    result_invalid = assess_output(
+        cases_by_id["invalid_input_diagnostic"],
+        status="succeeded",
+        content=diag_invalid_input.encode(),
+    )
+    assert result_invalid["status"] == "passed"
 
 
 # ---------------------------------------------------------------------------
-# Input validation semantics
+# Input validation semantics & unusable result handling
 # ---------------------------------------------------------------------------
 
 
 def test_supported_platforms_match_manifest_enum():
     manifest = json.loads((PACKAGE_DIR / "workflow.json").read_text())
-    schema_enum = set(manifest["definition"]["input_schema"]["properties"]["review_platform"]["enum"])
+    props = manifest["definition"]["input_schema"]["properties"]
+    schema_enum = set(props["review_platform"]["enum"])
     assert schema_enum == SUPPORTED_PLATFORMS
 
 
-def test_unusable_model_result_is_documented():
-    """Documents what a diagnostic output looks like for this workflow."""
-    diagnostic_output = (
+def test_unusable_model_result_handling_and_rejections():
+    """Verify that unusable results pass diagnostic cases and are rejected by ordinary cases."""
+    from tin_lite.workflow_qualification import Qualification, assess_output
+
+    contract = Qualification.model_validate_json(QUALIFICATION_FILE.read_bytes())
+    cases_by_id = {c.id: c for c in contract.cases}
+
+    # 1. Not-found diagnostic passes the not_found case
+    not_found_output = (
         "# Competitor Review Miner — Diagnostic Report\n\n"
         "Status: not found\n\n"
-        "No listing found for the competitor on the declared platform.\n"
+        'Reason: No listing found for "xXxNoSuchProduct999xXx" on trustpilot.\n'
     )
-    assert "Diagnostic Report" in diagnostic_output
-    assert "Status:" in diagnostic_output
+    result = assess_output(
+        cases_by_id["not_found_diagnostic"],
+        status="succeeded",
+        content=not_found_output.encode(),
+    )
+    assert result["status"] == "passed"
+
+    # 2. Not-found diagnostic fails ordinary_reviews because ordinary excludes diagnostic status
+    result_ord_rejected = assess_output(
+        cases_by_id["ordinary_reviews"],
+        status="succeeded",
+        content=not_found_output.encode(),
+    )
+    assert result_ord_rejected["status"] == "failed"
+
+    # 3. Insufficient data diagnostic passes insufficient_data case
+    insufficient_output = (
+        "# Competitor Review Miner — Diagnostic Report\n\n"
+        "Status: insufficient data\n\n"
+        'Reason: Fewer than 2 reviews found for "BrandNewStealthApp" on producthunt.\n'
+    )
+    result_insuff = assess_output(
+        cases_by_id["insufficient_data_diagnostic"],
+        status="succeeded",
+        content=insufficient_output.encode(),
+    )
+    assert result_insuff["status"] == "passed"
+
+    # 4. Insufficient data fails ordinary_reviews
+    assert (
+        assess_output(
+            cases_by_id["ordinary_reviews"],
+            status="succeeded",
+            content=insufficient_output.encode(),
+        )["status"]
+        == "failed"
+    )
+
+    # 5. Invalid input diagnostic passes invalid_input case
+    invalid_input_output = (
+        "# Competitor Review Miner — Diagnostic Report\n\n"
+        "Status: invalid input\n\n"
+        "Reason: competitor_name cannot be a URL.\n"
+    )
+    result_invalid = assess_output(
+        cases_by_id["invalid_input_diagnostic"],
+        status="succeeded",
+        content=invalid_input_output.encode(),
+    )
+    assert result_invalid["status"] == "passed"
+
+    # 6. Diagnostic case rejects report that includes normal headings (e.g. ## Three growth moves)
+    contaminated_diagnostic = (
+        "# Competitor Review Miner — Diagnostic Report\n\n"
+        "Status: not found\n\n"
+        "## Three growth moves\n"
+        "Contaminated section\n"
+    )
+    result_contaminated = assess_output(
+        cases_by_id["not_found_diagnostic"],
+        status="succeeded",
+        content=contaminated_diagnostic.encode(),
+    )
+    assert result_contaminated["status"] == "failed"
+
+    # 7. Null/missing content fails assessment
+    assert (
+        assess_output(
+            cases_by_id["not_found_diagnostic"],
+            status="succeeded",
+            content=None,
+        )["status"]
+        == "failed"
+    )

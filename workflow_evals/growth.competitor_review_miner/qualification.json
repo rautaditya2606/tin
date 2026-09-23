@@ -3,8 +3,8 @@
   "assumptions": [
     "Competitor has a public listing on the declared review platform (G2, Capterra, Trustpilot, GetApp, Software Advice, or Product Hunt).",
     "At most 30 reviews fetched from the first page of the platform listing.",
-    "Safe project context bounded to at most 8000 bytes from non-sensitive documentation (e.g. README, public docs).",
-    "Agent uses web search to locate the competitor listing; does not require the user to paste review text."
+    "The procedure does not inspect workspace files, environment variables, or credentials; it operates solely on public review data.",
+    "Agent uses site-scoped web search to locate the competitor listing; does not require the user to paste review text."
   ],
   "cost_drivers": [
     "Bounded Codex procedure session using standard rate card; spending capped at configured sandbox ceiling.",
@@ -14,8 +14,7 @@
   ],
   "effects": [
     "Writes reports/COMPETITOR_REVIEW_MINER.md in the bound project workspace.",
-    "No mutations outside reports/COMPETITOR_REVIEW_MINER.md, no secret access, no publication.",
-    "Web search is bounded to the declared platform domain."
+    "No mutations outside reports/COMPETITOR_REVIEW_MINER.md; no provider mutation or publication."
   ],
   "cases": [
     {
@@ -67,13 +66,14 @@
         ],
         "excludes": [
           "Status: invalid input",
-          "Status: not found"
+          "Status: not found",
+          "Status: insufficient data"
         ]
       }
     },
     {
       "id": "not_found_diagnostic",
-      "description": "Unusable result case: obscure competitor name with no listing on the platform produces a diagnostic report.",
+      "description": "Unusable result case: obscure competitor name with no listing found on the platform produces a diagnostic report.",
       "inputs": {
         "competitor_name": "xXxNoSuchProduct999xXx",
         "review_platform": "trustpilot",
@@ -83,10 +83,51 @@
       "expect": {
         "contains": [
           "# Competitor Review Miner — Diagnostic Report",
-          "Status:"
+          "Status: not found"
         ],
         "excludes": [
-          "## Three growth moves"
+          "## Three growth moves",
+          "## Signal summary"
+        ]
+      }
+    },
+    {
+      "id": "insufficient_data_diagnostic",
+      "description": "Sparse data case: listing found but fewer than 2 reviews available on the platform produces an insufficient data diagnostic report.",
+      "inputs": {
+        "competitor_name": "BrandNewStealthApp",
+        "review_platform": "producthunt",
+        "focus": ""
+      },
+      "expected_status": "succeeded",
+      "expect": {
+        "contains": [
+          "# Competitor Review Miner — Diagnostic Report",
+          "Status: insufficient data"
+        ],
+        "excludes": [
+          "## Three growth moves",
+          "## Signal summary"
+        ]
+      }
+    },
+    {
+      "id": "invalid_input_diagnostic",
+      "description": "Semantic input error: URL passed as competitor_name fails Step 1 validation and produces an invalid input diagnostic report.",
+      "inputs": {
+        "competitor_name": "https://competitor.com/product/reviews",
+        "review_platform": "g2",
+        "focus": ""
+      },
+      "expected_status": "succeeded",
+      "expect": {
+        "contains": [
+          "# Competitor Review Miner — Diagnostic Report",
+          "Status: invalid input"
+        ],
+        "excludes": [
+          "## Three growth moves",
+          "## Signal summary"
         ]
       }
     }
@@ -102,7 +143,7 @@
     },
     {
       "id": "boundaries",
-      "question": "Does the workflow respect data bounds (cap at 30 reviews, only the declared platform domain, diagnostic output when no listing is found, no sensitive file reads) without hallucinations?"
+      "question": "Does the workflow respect operational bounds (caps review collection at 30, targets the declared platform listing, and produces diagnostic output when no listing or insufficient reviews are found) without hallucinating evidence?"
     }
   ]
 }
