@@ -3,14 +3,14 @@
   "definition": {
     "key": "growth.competitor_review_miner",
     "title": "Mine competitor reviews for growth signals",
-    "description": "A founder pastes raw competitor app reviews and gets back ranked pain points, switching triggers, and three concrete moves to acquire their unhappy users.",
-    "version": "1.0.0",
+    "description": "Searches a specific public review platform (G2, Capterra, Trustpilot, etc.) for competitor reviews and produces ranked pain points, switching triggers, and three concrete moves to acquire their unhappy users.",
+    "version": "2.0.0",
     "executor": "codex.procedure",
     "schedule_modes": ["on_demand"],
     "input_schema": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["project_id", "competitor_name", "reviews_text"],
+      "required": ["project_id", "competitor_name", "review_platform"],
       "properties": {
         "project_id": {
           "type": "string",
@@ -20,15 +20,14 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200,
-          "title": "Competitor name",
+          "title": "Competitor name (as it appears on the review platform)",
           "x-tin-ui": { "control": "text", "order": 10 }
         },
-        "reviews_text": {
+        "review_platform": {
           "type": "string",
-          "minLength": 10,
-          "maxLength": 16000,
-          "title": "Competitor reviews (paste one review per line, or CSV with a 'review' column)",
-          "x-tin-ui": { "control": "textarea", "order": 20 }
+          "enum": ["g2", "capterra", "trustpilot", "getapp", "software_advice", "producthunt"],
+          "title": "Review platform to search",
+          "x-tin-ui": { "control": "select", "order": 20 }
         },
         "focus": {
           "type": "string",

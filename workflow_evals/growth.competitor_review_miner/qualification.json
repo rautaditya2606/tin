@@ -1,32 +1,35 @@
 {
   "version": 1,
   "assumptions": [
-    "Public competitor review text or CSV export with at least two reviews and at most 200,000 characters.",
-    "At most 200 reviews parsed and analyzed per execution.",
-    "Safe project context bounded to at most 8000 bytes from non-sensitive documentation (e.g. README, public docs)."
+    "Competitor has a public listing on the declared review platform (G2, Capterra, Trustpilot, GetApp, Software Advice, or Product Hunt).",
+    "At most 30 reviews fetched from the first page of the platform listing.",
+    "Safe project context bounded to at most 8000 bytes from non-sensitive documentation (e.g. README, public docs).",
+    "Agent uses web search to locate the competitor listing; does not require the user to paste review text."
   ],
   "cost_drivers": [
     "Bounded Codex procedure session using standard rate card; spending capped at configured sandbox ceiling.",
-    "Execution work scales with review corpus token count (up to 200 reviews) and output narrative size.",
-    "Zero paid external integrations or live provider API requests."
+    "Web search calls are gated by the sandbox egress fence (fenced egress, isolated profile).",
+    "Execution work scales with number of reviews collected (up to 30) and output narrative size.",
+    "Zero paid external integrations or live provider API keys required."
   ],
   "effects": [
     "Writes reports/COMPETITOR_REVIEW_MINER.md in the bound project workspace.",
-    "No external network egress, file mutations outside reports/COMPETITOR_REVIEW_MINER.md, secret access, or publication."
+    "No mutations outside reports/COMPETITOR_REVIEW_MINER.md, no secret access, no publication.",
+    "Web search is bounded to the declared platform domain."
   ],
   "cases": [
     {
       "id": "ordinary_reviews",
-      "description": "Normal case: Three realistic competitor reviews with pain points, loved features, and a switching trigger.",
+      "description": "Normal case: well-known competitor on G2 with pain points, loved features, and a switching trigger expected.",
       "inputs": {
-        "competitor_name": "AcmeDesk",
-        "reviews_text": "I switched away from AcmeDesk because pricing jumped 40% overnight for small teams.\nAcmeDesk has a clean dashboard and great ticket triage, which our agents loved.\nSync is terribly slow and the mobile app crashes whenever resolving large queues.",
-        "focus": "pricing and reliability"
+        "competitor_name": "Intercom",
+        "review_platform": "g2",
+        "focus": "pricing and onboarding"
       },
       "expected_status": "succeeded",
       "expect": {
         "contains": [
-          "Competitor review intelligence: AcmeDesk",
+          "Competitor review intelligence: Intercom",
           "## Signal summary",
           "## Pain Points",
           "## Loved Features",
@@ -35,53 +38,52 @@
           "## Missed Use Cases",
           "## Three growth moves",
           "## Evidence notes",
-          "switched"
+          "g2"
         ],
         "excludes": [
           "Status: invalid input",
+          "Status: not found",
           "Status: insufficient data"
         ]
       }
     },
     {
-      "id": "boundary_csv_and_cap",
-      "description": "Boundary case: CSV with standard header column and reviews reaching processing bounds.",
+      "id": "alternate_platform",
+      "description": "Boundary case: same competitor searched on Capterra instead of G2.",
       "inputs": {
-        "competitor_name": "LegacyCRM",
-        "reviews_text": "review,rating\n\"Exporting contact lists takes 20 minutes and frequently timeouts.\",2\n\"Love the automated email sequences, but reporting is completely opaque.\",3\n\"Canceled our subscription after hidden add-on fees for SSO.\",1\n\"Customer support took 4 days to respond to an outage.\",1\n\"Good basic contact storage but lacks modern webhook integrations.\",2\n",
+        "competitor_name": "HubSpot",
+        "review_platform": "capterra",
         "focus": ""
       },
       "expected_status": "succeeded",
       "expect": {
         "contains": [
-          "Competitor review intelligence: LegacyCRM",
+          "Competitor review intelligence: HubSpot",
           "## Signal summary",
           "## Pain Points",
-          "## Switching Triggers",
-          "## Pricing Signals",
           "## Three growth moves",
           "## Evidence notes",
-          "CSV"
+          "capterra"
         ],
         "excludes": [
-          "Status: invalid input"
+          "Status: invalid input",
+          "Status: not found"
         ]
       }
     },
     {
-      "id": "insufficient_reviews_diagnostic",
-      "description": "Unusable result case: Single review line fails the two-review minimum, producing a diagnostic report.",
+      "id": "not_found_diagnostic",
+      "description": "Unusable result case: obscure competitor name with no listing on the platform produces a diagnostic report.",
       "inputs": {
-        "competitor_name": "SoloTool",
-        "reviews_text": "Just one short review line.",
+        "competitor_name": "xXxNoSuchProduct999xXx",
+        "review_platform": "trustpilot",
         "focus": ""
       },
       "expected_status": "succeeded",
       "expect": {
         "contains": [
           "# Competitor Review Miner — Diagnostic Report",
-          "Status: invalid input",
-          "insufficient"
+          "Status:"
         ],
         "excludes": [
           "## Three growth moves"
@@ -92,7 +94,7 @@
   "rubric": [
     {
       "id": "grounding",
-      "question": "Is every pain point, loved feature, and switching trigger backed by verbatim quotes from the supplied reviews?"
+      "question": "Is every pain point, loved feature, and switching trigger backed by verbatim or clearly attributed quotes from reviews found on the declared platform?"
     },
     {
       "id": "actionability",
@@ -100,7 +102,7 @@
     },
     {
       "id": "boundaries",
-      "question": "Does the workflow respect data bounds (cap at 200 reviews, safe file reads only, diagnostic output on invalid input) without hallucinations?"
+      "question": "Does the workflow respect data bounds (cap at 30 reviews, only the declared platform domain, diagnostic output when no listing is found, no sensitive file reads) without hallucinations?"
     }
   ]
 }
